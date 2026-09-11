@@ -1,0 +1,35 @@
+file(MAKE_DIRECTORY "${FIXTURE_DIR}")
+# Copy only generated root/config, artwork and archive: no loose install/.
+file(COPY "${NEUTRAL_DIR}/RealityFactory.ini" "${NEUTRAL_DIR}/neutral.vfs"
+    "${NEUTRAL_DIR}/bitmaps" DESTINATION "${FIXTURE_DIR}")
+if(EXISTS "${FIXTURE_DIR}/install")
+    message(FATAL_ERROR "Archive-only fixture unexpectedly contains loose install/")
+endif()
+if(REJECTED)
+    file(WRITE "${FIXTURE_DIR}/rejected.vfs" "CF00")
+    file(APPEND "${FIXTURE_DIR}/RealityFactory.ini" "packfile=rejected.vfs\r\n")
+else()
+    file(APPEND "${FIXTURE_DIR}/RealityFactory.ini" "packfile=neutral.vfs\r\n")
+endif()
+execute_process(COMMAND "${XVFB}" -a -s "-screen 0 640x480x24"
+    "${RUNNER}" --boot-stage=2 "--config-dir=${FIXTURE_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 25)
+set(log "${out}\n${err}")
+file(WRITE "${FIXTURE_DIR}/vfs-boot.log" "${log}")
+if(log MATCHES "ERROR: (AddressSanitizer|LeakSanitizer)|runtime error:")
+    message(FATAL_ERROR "VFS boot sanitizer failure: ${log}")
+endif()
+if(REJECTED)
+    if(NOT status EQUAL 1 OR log MATCHES "VFS detected" OR
+       NOT log MATCHES "Configured VFS archive could not be opened" OR
+       NOT log MATCHES "RF fatal: host teardown complete")
+        message(FATAL_ERROR "Rejected VFS boot failed (${status}): ${log}")
+    endif()
+    if(SANITIZED AND NOT log MATCHES "RF fatal: explicit LSan check=0")
+        message(FATAL_ERROR "Explicit LSan check absent: ${log}")
+    endif()
+else()
+    if(NOT status EQUAL 0 OR NOT log MATCHES "RF boot stage 2: full InitializeCommon returned")
+        message(FATAL_ERROR "Archive-only boot failed (${status}): ${log}")
+    endif()
+endif()
